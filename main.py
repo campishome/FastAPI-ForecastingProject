@@ -348,8 +348,24 @@ import numpy as np
 import joblib
 import io
 from sklearn.metrics import mean_squared_error, mean_absolute_error
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+origins = [
+    "http://localhost:4200",     # ตอน dev Angular
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,        # ใส่ ["*"] ถ้าจะเปิดทุก origin
+    allow_credentials=True,
+    allow_methods=["*"],          # GET, POST, PUT, DELETE, OPTIONS
+    allow_headers=["*"],
+)
+
+@app.get("/")
+def root():
+    return {"msg": "API is alive!"}
 
 model_paths = {
     "06": {  # กข 6
