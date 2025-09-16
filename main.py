@@ -556,4 +556,53 @@ async def evaluate(
     }
 
 ##python -m uvicorn main:app --reload
-#vercel --prod
+
+#--okay
+from pydantic import BaseModel
+# ====== Schema ======
+class FutureForecastRequest(BaseModel):
+    model_type: str
+    Province: str | None = None
+    District: str | None = None
+    features: dict   # key = feature name, value = float
+
+# ====== Endpoint พยากรณ์อนาคต ======
+@app.post("/forecast_future/{level}/{crop}/")
+async def forecast_future(level: str, crop: str, request: FutureForecastRequest):
+    if level not in ["province", "district"]:
+        return {"error": "Invalid level. Choose 'province' or 'district'."}
+
+    if crop not in model_paths:
+        return {"error": f"Crop '{crop}' not supported"}
+
+    if request.model_type not in model_paths[crop][level]:
+        return {"error": f"Invalid model_type '{request.model_type}'"}
+
+    # Load scalers + model
+    scaler_X = joblib.load(scalers[crop][level]["X"])
+    scaler_y = joblib.load(scalers[crop][level]["y"])
+    model = joblib.load(model_paths[crop][level][request.model_type])
+
+    # เตรียม features
+    try:
+        X_input = np.array([request.features[f] for f in features]).reshape(1, -1)
+    except KeyError as e:
+        return {"error": f"Missing feature: {str(e)}"}
+
+    # Scale & Predict
+    X_scaled = scaler_X.transform(X_input)
+    y_pred_scaled = model.predict(X_scaled)
+    y_pred = scaler_y.inverse_transform(y_pred_scaled)
+
+    return {
+        "Province": request.Province,
+        "District": request.District,
+        "Crop": crop,
+        "Model": request.model_type,
+        "Forecast": {
+            "Yield/Harvest-area": float(y_pred[0][0]),
+            "Yield/Plant-area": float(y_pred[0][1])
+        }
+    }
+
+#---
