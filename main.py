@@ -551,11 +551,19 @@ async def evaluate(
         "MSE": mse.tolist(),
         "MAE": mae.tolist(),
         "y_true_vs_pred": [
-            {"true": yt, "pred": yp} for yt, yp in zip(y.values.tolist(), y_pred.tolist())
+        {
+            "Year": year,
+            "true": yt,
+            "pred": yp
+        }
+        for year, yt, yp in zip(filtered_df["Year"].tolist(), y.values.tolist(), y_pred.tolist())
         ]
     }
 
-##python -m uvicorn main:app --reload
+# python -m uvicorn main:app --reload
+# git add .
+# git commit -m "update add CORS middleware"
+# git push origin main
 
 #--okay
 from pydantic import BaseModel
