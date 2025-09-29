@@ -425,12 +425,24 @@ scalers = {
     }
 }
 
-features = [
-    'Product/ Yield (kg)', 'Plant-month', 'Cutivated Area (rai)',
-    'Harvest-area (rai)', 'rain-avg', 'press-avg', 'temp-avg',
-    'RH-avg', 'wind-avg', 'NDVI', 'runoff', 'RootMoist_inst'
-]
+#Features แยกตาม level
+features = {
+    "province": [
+        'Product/ Yield (kg)', 'Plant-month', 'Cutivated Area (rai)',
+        'Harvest-area (rai)', 'rain-avg', 'press-avg', 'temp-avg',
+        'RH-avg', 'wind-avg', 'NDVI', 'runoff', 'RootMoist_inst',
+        'province_lat', 'province_lon','Year'
+    ],
+    "district": [
+        'Product/ Yield (kg)', 'Plant-month', 'Cutivated Area (rai)',
+        'Harvest-area (rai)', 'rain-avg', 'press-avg', 'temp-avg',
+        'RH-avg', 'wind-avg', 'NDVI', 'runoff', 'RootMoist_inst',
+        'district_lat', 'district_lon','Year'
+    ]
+}
+
 targets = ['Yield/Harvest-area', 'Yield/Plant-area']
+
 
 @app.post("/forecast/{level}/{crop}/")
 async def forecast(
@@ -463,7 +475,8 @@ async def forecast(
     if filtered_df.empty:
         return {"error": f"No data found for {col_name} '{area_value}'"}
 
-    X = filtered_df[features]
+    # ✅ ใช้ features ตาม level
+    X = filtered_df[features[level]]
 
     # Load scalers + model
     scaler_X = joblib.load(scalers[crop][level]["X"])
@@ -487,8 +500,9 @@ async def forecast(
         col_name: area_value,
         "Crop": crop,
         "Model": model_type,
-        "Forecast": results[[col_name] + targets].to_dict(orient="records")
+        "Forecast": results[[col_name] + features[level][-2:] + targets].to_dict(orient="records")
     }
+
 @app.post("/evaluate/{level}/{crop}/")
 async def evaluate(
     level: str,
@@ -520,7 +534,8 @@ async def evaluate(
     if filtered_df.empty:
         return {"error": f"No data found for {col_name} '{area_value}'"}
 
-    X = filtered_df[features]
+    # ✅ ใช้ features ตาม level โดยไม่ rename
+    X = filtered_df[features[level]]
     y = filtered_df[targets]
 
     # Load scalers + model
@@ -551,14 +566,15 @@ async def evaluate(
         "MSE": mse.tolist(),
         "MAE": mae.tolist(),
         "y_true_vs_pred": [
-        {
-            "Year": year,
-            "true": yt,
-            "pred": yp
-        }
-        for year, yt, yp in zip(filtered_df["Year"].tolist(), y.values.tolist(), y_pred.tolist())
+            {
+                "Year": year,
+                "true": yt,
+                "pred": yp
+            }
+            for year, yt, yp in zip(filtered_df["Year"].tolist(), y.values.tolist(), y_pred.tolist())
         ]
     }
+
 
 # python -m uvicorn main:app --reload
 # git add .
@@ -567,12 +583,28 @@ async def evaluate(
 
 #--okay
 from pydantic import BaseModel
+
 # ====== Schema ======
 class FutureForecastRequest(BaseModel):
     model_type: str
     Province: str | None = None
     District: str | None = None
     features: dict   # key = feature name, value = float
+
+# ====== Feature Mapping ตาม level ======
+features_province = [
+        'Product/ Yield (kg)', 'Plant-month', 'Cutivated Area (rai)',
+        'Harvest-area (rai)', 'rain-avg', 'press-avg', 'temp-avg',
+        'RH-avg', 'wind-avg', 'NDVI', 'runoff', 'RootMoist_inst',
+        'province_lat', 'province_lon','Year'
+    ]
+
+features_district = [
+        'Product/ Yield (kg)', 'Plant-month', 'Cutivated Area (rai)',
+        'Harvest-area (rai)', 'rain-avg', 'press-avg', 'temp-avg',
+        'RH-avg', 'wind-avg', 'NDVI', 'runoff', 'RootMoist_inst',
+        'district_lat', 'district_lon','Year'
+    ]
 
 # ====== Endpoint พยากรณ์อนาคต ======
 @app.post("/forecast_future/{level}/{crop}/")
@@ -591,9 +623,15 @@ async def forecast_future(level: str, crop: str, request: FutureForecastRequest)
     scaler_y = joblib.load(scalers[crop][level]["y"])
     model = joblib.load(model_paths[crop][level][request.model_type])
 
+    # กำหนด features ที่ต้องใช้ตาม level
+    if level == "province":
+        feature_list = features_province
+    else:
+        feature_list = features_district
+
     # เตรียม features
     try:
-        X_input = np.array([request.features[f] for f in features]).reshape(1, -1)
+        X_input = np.array([request.features[f] for f in feature_list]).reshape(1, -1)
     except KeyError as e:
         return {"error": f"Missing feature: {str(e)}"}
 
@@ -613,4 +651,4 @@ async def forecast_future(level: str, crop: str, request: FutureForecastRequest)
         }
     }
 
-#---
+
