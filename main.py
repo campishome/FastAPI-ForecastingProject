@@ -1,347 +1,3 @@
-"""
-from fastapi import FastAPI, UploadFile, File ,Form
-import pandas as pd
-import io
-import joblib
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.multioutput import MultiOutputRegressor
-from sklearn.metrics import mean_squared_error, mean_absolute_error
-from xgboost import XGBRegressor
-from catboost import CatBoostRegressor
-import numpy as np
-from fastapi.middleware.cors import CORSMiddleware
-
-
-app=FastAPI()
-#ต่อ DB ได้หากจะเพิ่มในอนาคต
-
-@app.get("/")
-def root():
-    return {"Message":"Hello world!"}
-
-@app.get("/started")
-def get_started():
-    return {"Message":"Started"}
-
-@app.post("/upload_excel/")
-async def upload_excel(file: UploadFile = File(...)):
-    # เช็คว่าเป็นไฟล์ .xlsx หรือไม่
-    if not file.filename.endswith(".xlsx"):
-        return {"error": "Only .xlsx files are supported"}
-
-    # อ่านไฟล์ด้วย pandas
-    contents = await file.read()  
-    # ใช้ BytesIO เพื่อให้ pandas อ่านจาก memory ได้
-    df = pd.read_excel(io.BytesIO(contents))
-
-    # ส่ง 5 แถวแรกกลับ (แปลงเป็น dict)
-    head_data = df.head().to_dict(orient="records")
-
-    return {
-        "filename": file.filename,
-        "head": head_data
-    }
-
-@app.post("/upload_and_forecast/")
-async def upload_and_forecast(file: UploadFile = File(...)):
-    #เช็คว่าไฟล์
-    if not file.filename.endswith(".xlsx"):
-        return {"error": "Only .xlsx files are supported"}
-
-    #DataFrame
-    contents = await file.read()
-    df = pd.read_excel(io.BytesIO(contents))
-
-    test_years = [55, 66]
-
-    #Train/Test split
-    train_data = df[~df['Year'].isin(test_years)]
-    test_data = df[df['Year'].isin(test_years)]
-
-    #Features & Targets
-    features = ['Product/ Yield (kg)', 'Duration-month', 'Cutivated Area (rai)', 
-                'Harvest-area (rai)', 'rain-avg', 'press-avg', 'temp-avg', 
-                'RH-avg', 'wind-avg', 'NDVI', 'runoff', 'RootMoist_inst']
-    targets = ['Yield/Harvest-area', 'Yield/Plant-area']
-
-    X_train = train_data[features]
-    y_train = train_data[targets]
-
-    X_test = test_data[features]
-    y_test = test_data[targets]
-
-    #Train model
-    base_estimator = RandomForestRegressor(n_estimators=100, random_state=42)
-    model = MultiOutputRegressor(base_estimator)
-    model.fit(X_train, y_train)
-
-    #Predict
-    y_pred = model.predict(X_test)
-
-    #Metrics
-    rmse = np.sqrt(mean_squared_error(y_test, y_pred, multioutput="raw_values"))
-    mse = mean_squared_error(y_test, y_pred, multioutput="raw_values")
-    mae = mean_absolute_error(y_test, y_pred, multioutput="raw_values")
-
-    return {
-        "filename": file.filename,
-        "RMSE": rmse.tolist(),
-        "MSE": mse.tolist(),
-        "MAE": mae.tolist()
-    }
-##python -m uvicorn main:app --reload
-
-
-@app.post("/upload_and_choose_province/")
-async def upload_and_forecast_province(Province: str = Form(...) ,file: UploadFile = File(...)):
-    #เช็คว่าไฟล์
-    if not file.filename.endswith(".xlsx"):
-        return {"error": "Only .xlsx files are supported"}
-    
-    # อ่านไฟล์ด้วย pandas
-    contents = await file.read()  
-    # ใช้ BytesIO เพื่อให้ pandas อ่านจาก memory ได้
-    df = pd.read_excel(io.BytesIO(contents))
-
-    #filter เฉพาะจังหวัดที่ผู้ใช้เลือก
-    if "Province" not in df.columns:
-        return {"error": "Column 'Province' not found in Excel"}
-
-    filtered_df = df[df["Province"] == Province]
-
-    #ส่งออกเป็น dict
-    data = filtered_df.to_dict(orient="records")
-
-    return {
-        "Province": Province,
-        "count": len(filtered_df),
-        "list": data
-    }
-    
-#model + rice_type + 
-
-
-# @app.post("/upload_chooseProvince_and_Forecasting/")
-# async def upload_chooseProvince_and_Forecasting(
-#     Province: str = Form(...),
-#     file: UploadFile = File(...)
-# ):
-#     #เช็ค
-#     if not file.filename.endswith(".xlsx"):
-#         return {"error": "Only .xlsx files are supported"}
-
-#     contents = await file.read()
-#     df = pd.read_excel(io.BytesIO(contents))
-
-#     #filter เฉพาะจังหวัด
-#     if "Province" not in df.columns:
-#         return {"error": "Column 'Province' not found in Excel"}
-
-#     filtered_df = df[df["Province"] == Province]
-
-#     if filtered_df.empty:
-#         return {"error": f"No data found for Province '{Province}'"}
-
-#     #Train/Test split
-#     test_years = [55, 66]  #---* ใช้ปีสุดท้าย
-#     train_data = filtered_df[~filtered_df['Year'].isin(test_years)]
-#     test_data = filtered_df[filtered_df['Year'].isin(test_years)]
-
-#     #Features & Targets
-#     features = [
-#         'Product/ Yield (kg)', 'Duration-month', 'Cutivated Area (rai)', 
-#         'Harvest-area (rai)', 'rain-avg', 'press-avg', 'temp-avg', 
-#         'RH-avg', 'wind-avg', 'NDVI', 'runoff', 'RootMoist_inst'
-#     ]
-#     targets = ['Yield/Harvest-area', 'Yield/Plant-area']
-
-#     X_train = train_data[features]
-#     y_train = train_data[targets]
-
-#     X_test = test_data[features]
-#     y_test = test_data[targets]
-
-#     #Train model ---------------------------------------------- rf , sgd , linear regression
-#     base_estimator = RandomForestRegressor(n_estimators=100, random_state=42)
-#     model = MultiOutputRegressor(base_estimator)
-#     model.fit(X_train, y_train)
-
-#     #Predict
-#     y_pred = model.predict(X_test)
-
-    
-#     rmse = np.sqrt(mean_squared_error(y_test, y_pred, multioutput="raw_values"))
-#     mse = mean_squared_error(y_test, y_pred, multioutput="raw_values")
-#     mae = mean_absolute_error(y_test, y_pred, multioutput="raw_values")
-
-#     return {
-#         "filename": file.filename,
-#         "Province": Province,
-#         "RMSE": rmse.tolist(),
-#         "MSE": mse.tolist(),
-#         "MAE": mae.tolist()
-#     }
-
-#หลังบ้านต้องใช้เป็น saved modle?  *ใช่  *model เรา *มี train + test 
-#
-#model  พยากรณ์ปีสุดท้าย  พันธ์ข้าว
-#ใสไฟล์ excel เข้ามา
-#standardization ก่อนจะ forecast  แต่ผลลัพท์ไม่ต้องทำ -----done
-
-
-model06_paths = {
-    "rf": "assets/models/randomforest_model_06.pkl", #กข 6 / อำเภอ
-    "sgd": "assets/models/sgd_model_06.pkl", #กข 6 / อำเภอ
-    "linear": "assets/models/linearreg_model_06.pkl", #กข 6 / อำเภอ
-    "catb": "assets/models/catboost_model_06.pkl",
-    "xgb": "assets/models/xgboost_model_06.pkl",
-}
-model105_paths = {
-    "rf": "assets/models/randomforest_model_105.pkl", #ขาวดอกมะลิ105 / อำเภอ
-    "sgd": "assets/models/sgd_model_105.pkl", 
-    "linear": "assets/models/linearreg_model_105.pkl",
-    "catb": "assets/models/catboost_model_105.pkl",
-    "xgb": "assets/models/xgboost_model_105.pkl",
-}
-
-
-@app.post("/upload_chooseDistrict_and_Forecasting_06/") 
-async def upload_chooseDistrict_and_Forecasting_06(
-    District: str = Form(...),
-    model_type: str = Form(...),   # ให้เลือก rf / sgd / linear / catb /xgb
-    file: UploadFile = File(...)
-):
-    # ตรวจสอบไฟล์
-    if not file.filename.endswith(".xlsx"):
-        return {"error": "Only .xlsx files are supported"}
-    scaler_X = joblib.load("assets/models/scaler_X_06.pkl") #กข 6 / อำเภอ
-    scaler_y = joblib.load("assets/models/scaler_y_06.pkl") #กข 6 / อำเภอ
-    contents = await file.read()
-    df = pd.read_excel(io.BytesIO(contents))
-
-    # filter เฉพาะจังหวัด
-    if "District" not in df.columns:
-        return {"error": "Column 'District' not found in Excel"}
-
-    filtered_df = df[df["District"] == District]
-    if filtered_df.empty:
-        return {"error": f"No data found for District '{District}'"}
-
-    # Features & Targets
-    features = [
-        'Product/ Yield (kg)', 'Plant-month', 'Cutivated Area (rai)', 
-        'Harvest-area (rai)', 'rain-avg', 'press-avg', 'temp-avg', 
-        'RH-avg', 'wind-avg', 'NDVI', 'runoff', 'RootMoist_inst'
-    ]
-    targets = ['Yield/Harvest-area', 'Yield/Plant-area']
-
-    X = filtered_df[features]
-    y = filtered_df[targets]
-
-    # Scaling
-    X_scaled = scaler_X.transform(X)
-    y_scaled = scaler_y.transform(y)
-
-    # โหลดโมเดลที่เลือก
-    if model_type not in model06_paths:
-        return {"error": f"Invalid model_type '{model_type}'. Choose from {list(model06_paths.keys())}"}
-    
-    model = joblib.load(model06_paths[model_type])
-
-    # ทำนาย
-    y_pred_scaled = model.predict(X_scaled)
-    y_pred = scaler_y.inverse_transform(y_pred_scaled)
-
-    # Evaluate
-    rmse = np.sqrt(mean_squared_error(y, y_pred, multioutput="raw_values"))
-    mse = mean_squared_error(y, y_pred, multioutput="raw_values")
-    mae = mean_absolute_error(y, y_pred, multioutput="raw_values")
-
-    # Result
-    results = filtered_df.copy()
-    results["Pred_Yield/Harvest-area"] = y_pred[:, 0]
-    results["Pred_Yield/Plant-area"] = y_pred[:, 1]
-    return {
-        "filename": file.filename,
-        "District": District,
-        "Model": model_type,
-        "RMSE": rmse.tolist(),
-        "MSE": mse.tolist(),
-        "MAE": mae.tolist(),
-        "Predictions": results.to_dict(orient="records")
-    }
-
-
-#--- เพิ่มของ 105 / อำเภอ8
-
-@app.post("/upload_chooseDistrict_and_Forecasting_105/") 
-async def upload_chooseDistrict_and_Forecasting_105(
-    District: str = Form(...),
-    model_type: str = Form(...),   # ให้เลือก rf / sgd / linear / catb /xgb
-    file: UploadFile = File(...)
-):
-    # ตรวจสอบไฟล์
-    if not file.filename.endswith(".xlsx"):
-        return {"error": "Only .xlsx files are supported"}
-
-    contents = await file.read()
-    df = pd.read_excel(io.BytesIO(contents))
-    
-    scaler_X = joblib.load("assets/models/scaler_X_105.pkl") #105 / อำเภอ
-    scaler_y = joblib.load("assets/models/scaler_y_105.pkl") 
-    # filter เฉพาะจังหวัด
-    if "District" not in df.columns:
-        return {"error": "Column 'District' not found in Excel"}
-
-    filtered_df = df[df["District"] == District]
-    if filtered_df.empty:
-        return {"error": f"No data found for District '{District}'"}
-
-    # Features & Targets
-    features = [
-        'Product/ Yield (kg)', 'Plant-month', 'Cutivated Area (rai)', 
-        'Harvest-area (rai)', 'rain-avg', 'press-avg', 'temp-avg', 
-        'RH-avg', 'wind-avg', 'NDVI', 'runoff', 'RootMoist_inst'
-    ]
-    targets = ['Yield/Harvest-area', 'Yield/Plant-area']
-
-    X = filtered_df[features]
-    y = filtered_df[targets]
-
-    # Scaling
-    X_scaled = scaler_X.transform(X)
-    y_scaled = scaler_y.transform(y)
-
-    # โหลดโมเดลที่เลือก
-    if model_type not in model105_paths:
-        return {"error": f"Invalid model_type '{model_type}'. Choose from {list(model105_paths.keys())}"}
-    
-    model = joblib.load(model105_paths[model_type])
-
-    # ทำนาย
-    y_pred_scaled = model.predict(X_scaled)
-    y_pred = scaler_y.inverse_transform(y_pred_scaled)
-
-    # Evaluate
-    rmse = np.sqrt(mean_squared_error(y, y_pred, multioutput="raw_values"))
-    mse = mean_squared_error(y, y_pred, multioutput="raw_values")
-    mae = mean_absolute_error(y, y_pred, multioutput="raw_values")
-
-    # Result
-    results = filtered_df.copy()
-    results["Pred_Yield/Harvest-area"] = y_pred[:, 0]
-    results["Pred_Yield/Plant-area"] = y_pred[:, 1]
-    return {
-        "filename": file.filename,
-        "District": District,
-        "Model": model_type,
-        "RMSE": rmse.tolist(),
-        "MSE": mse.tolist(),
-        "MAE": mae.tolist(),
-        "Predictions": results.to_dict(orient="records")
-    }
-"""
-
 from fastapi import FastAPI, Form, File, UploadFile
 import pandas as pd
 import numpy as np
@@ -349,6 +5,14 @@ import joblib
 import io
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from sklearn.preprocessing import StandardScaler
+import os
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.ensemble import RandomForestRegressor
+from xgboost import XGBRegressor
+from catboost import CatBoostRegressor
+from sklearn.linear_model import LinearRegression, SGDRegressor
 
 app = FastAPI()
 origins = [
@@ -582,7 +246,7 @@ async def evaluate(
 # git push origin main
 
 #--okay
-from pydantic import BaseModel
+
 
 # ====== Schema ======
 class FutureForecastRequest(BaseModel):
@@ -607,7 +271,15 @@ features_district = [
     ]
 
 # ====== Endpoint พยากรณ์อนาคต ======
-@app.post("/forecast_future/{level}/{crop}/")
+
+#input เป็นไฟล์ได้ด้วย  ---อีกเส้น อีก endpoint
+#เวลาเลือก จังหวัด อำเภอ ให้ fig lat lon ไว้เลย 
+#input สำหรับพยากรณ์มีได้หลาย record และผลการพยากรณ์มีออกมาได้เยอะ เช่น มีข้อมูลมาหลายๆอำเภอ ต้องออกมาเป็นแต่ละอำเภอในปีปัจจุบัน  "Year":2564
+#***sample ข้อมูลไว้ใช้ทดสอบเยอะๆหน่อย มีทั้งผิด และถูก
+#หาปัจจัยที่มีผล ต่อ target ว่าอันไหน มีผลสุด ---อีกเส้น อีก endpoint
+
+#เส้นนี้ช้าอยู่
+@app.post("/forecast_future/{level}/{crop}/") 
 async def forecast_future(level: str, crop: str, request: FutureForecastRequest):
     if level not in ["province", "district"]:
         return {"error": "Invalid level. Choose 'province' or 'district'."}
@@ -651,4 +323,184 @@ async def forecast_future(level: str, crop: str, request: FutureForecastRequest)
         }
     }
 
+#python -m uvicorn main:app --reload  #เวลาทำนายปี 2568 → ต้องใส่ features ของปี 2568 (a,b,c,d ของปี 68) เข้าไป
+@app.post("/forecast_file/{level}/{crop}/")
+async def forecast_file(level: str, crop: str, file: UploadFile = File(...),model_type: str = Form(...),):
+    if level not in ["province", "district"]:
+        return {"error": "Invalid level. Choose 'province' or 'district'."}
 
+    if crop not in model_paths:
+        return {"error": f"Crop '{crop}' not supported"}
+
+    # โหลดโมเดลและสเกลเลอร์
+    scaler_X = joblib.load(scalers[crop][level]["X"])
+    scaler_y = joblib.load(scalers[crop][level]["y"])
+
+    if model_type not in model_paths[crop][level]:
+        return {"error": f"Invalid model_type '{model_type}'"}
+
+    model = joblib.load(model_paths[crop][level][model_type])
+
+    # กำหนด features
+    if level == "province":
+        feature_list = features_province
+    else:
+        feature_list = features_district
+
+    # อ่านไฟล์
+    try:
+        contents = await file.read()
+        df = pd.read_csv(io.BytesIO(contents)) if file.filename.endswith(".csv") else pd.read_excel(io.BytesIO(contents))
+    except Exception as e:
+        return {"error": f"Error reading file: {str(e)}"}
+
+    # ตรวจสอบว่ามี features ครบ
+    missing_features = [f for f in feature_list if f not in df.columns]
+    if missing_features:
+        return {"error": f"Missing features in file: {missing_features}"}
+
+    results = []
+    for _, row in df.iterrows():
+        try:
+            X_input = np.array([row[f] for f in feature_list]).reshape(1, -1)
+            X_scaled = scaler_X.transform(X_input)
+            y_pred_scaled = model.predict(X_scaled)
+            y_pred = scaler_y.inverse_transform(y_pred_scaled)
+
+            result = {
+                "Province": row.get("Province") if "Province" in row else None,
+                "District": row.get("District") if "District" in row else None,
+                "Crop": crop,
+                "Variety/types": row.get("Variety/types") if "Variety/types" in row else None,
+                "Model": model_type,
+                "Year": row.get("Year") if "Year" in row else None,  # ปีปัจจุบัน "Year": pd.Timestamp.now().year,   # ปีปัจจุบัน
+                "Forecast": {
+                    "Yield/Harvest-area": float(y_pred[0][0]),
+                    "Yield/Plant-area": float(y_pred[0][1])
+                }
+            }
+            results.append(result)
+        except Exception as e:
+            results.append({"error": str(e), "row": row.to_dict()})
+
+    return {"results": results}
+
+# features = {
+#     "province": [
+#         'Product/ Yield (kg)', 'Plant-month', 'Cutivated Area (rai)',
+#         'Harvest-area (rai)', 'rain-avg', 'press-avg', 'temp-avg',
+#         'RH-avg', 'wind-avg', 'NDVI', 'runoff', 'RootMoist_inst',
+#         'province_lat', 'province_lon','Year'
+#     ],
+#     "district": [
+#         'Product/ Yield (kg)', 'Plant-month', 'Cutivated Area (rai)',
+#         'Harvest-area (rai)', 'rain-avg', 'press-avg', 'temp-avg',
+#         'RH-avg', 'wind-avg', 'NDVI', 'runoff', 'RootMoist_inst',
+#         'district_lat', 'district_lon','Year'
+#     ]
+# }
+# train model test เป็น อนาคตต่อจาก train เสมอ **fig เป็นปีสุดท้ายเอาไว้ test เลยดีกว่า
+@app.post("/train_model/{level}")
+async def train_model(
+    level: str,
+    model_type: str = Form(...),
+    train_years: str = Form(...),
+    test_years: str = Form(...),
+    file: UploadFile = File(...),
+):
+    # --- Validate input ---
+    if level not in features:
+        return {"error": f"Invalid level: {level}, must be one of {list(features.keys())}"}
+
+    # --- Load dataset ---
+    contents = await file.read()
+    df = pd.read_excel(io.BytesIO(contents))
+
+    # --- Convert year params ---
+    train_years = [int(y.strip()) for y in train_years.split(",")]
+    test_years = [int(y.strip()) for y in test_years.split(",")]
+
+    # --- Validate targets ---
+    for target in targets:
+        if target not in df.columns:
+            return {"error": f"Target '{target}' not found in dataset"}
+
+    # --- Split train/test ---
+    train_df = df[df["Year"].isin(train_years)]
+    test_df = df[df["Year"].isin(test_years)]
+
+    X_train = train_df[features[level]].drop(columns=["Year"])
+    y_train = train_df[targets]  # DataFrame เพื่อ scale
+    X_test = test_df[features[level]].drop(columns=["Year"])
+    y_test = test_df[targets].values  # numpy array
+
+    # --- Scaling ---
+    scaler_X = StandardScaler()
+    X_train_scaled = scaler_X.fit_transform(X_train)
+    X_test_scaled = scaler_X.transform(X_test)
+
+    scaler_y = StandardScaler()
+    y_train_scaled = scaler_y.fit_transform(y_train)
+
+    # --- Choose model ---
+    if model_type == "rf":
+        base_estimator = RandomForestRegressor(n_estimators=200, random_state=42)
+    elif model_type == "sgd":
+        base_estimator = SGDRegressor(random_state=42)
+    elif model_type == "linear":
+        base_estimator = LinearRegression()
+    elif model_type == "catb":
+        base_estimator = CatBoostRegressor(verbose=0, random_state=42)
+    elif model_type == "xgb":
+        base_estimator = XGBRegressor(random_state=42)
+    else:
+        return {"error": f"Unknown model_type: {model_type}"}
+
+    # --- MultiOutput ---
+    model = MultiOutputRegressor(base_estimator)
+    model.fit(X_train_scaled, y_train_scaled)
+
+    # --- Predict ---
+    y_pred_scaled = model.predict(X_test_scaled)
+    y_pred = scaler_y.inverse_transform(y_pred_scaled)
+
+    # --- Evaluate ---
+    mse = mean_squared_error(y_test, y_pred, multioutput="raw_values")
+    rmse = np.sqrt(mse)
+    mae = mean_absolute_error(y_test, y_pred, multioutput="raw_values")
+
+    # --- Feature importance ---
+    feature_names = X_train.columns.tolist()
+    importance = np.zeros(len(feature_names))
+    try:
+        if model_type in ["rf", "xgb", "catb"]:
+            all_importances = [est.feature_importances_ for est in model.estimators_]
+            importance = np.mean(all_importances, axis=0)
+        elif model_type in ["linear", "sgd"]:
+            all_coefs = [np.abs(est.coef_) for est in model.estimators_]
+            importance = np.mean(all_coefs, axis=0)
+    except:
+        importance = np.zeros(len(feature_names))
+
+    if importance.sum() > 0:
+        importance = importance / importance.sum() * 100
+
+    feature_importance = [
+        {"feature": f, "importance": round(float(imp), 2)}
+        for f, imp in zip(feature_names, importance)
+    ]
+
+    # --- Convert outputs to native types for JSON ---
+    return {
+        "level": level,
+        "model_type": model_type,
+        "targets": targets,
+        "train_years": train_years,
+        "test_years": test_years,
+        "mse": mse.tolist(),
+        "rmse": rmse.tolist(),
+        "mae": mae.tolist(),
+        "feature_importance": feature_importance,
+        "predictions": y_pred.tolist(),
+        "y_test": y_test.tolist()
+    }
