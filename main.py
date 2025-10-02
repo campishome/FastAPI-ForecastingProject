@@ -15,6 +15,7 @@ from catboost import CatBoostRegressor
 from sklearn.linear_model import LinearRegression, SGDRegressor
 
 app = FastAPI()
+
 origins = [
     "http://localhost:4200",     # ตอน dev Angular
 ]
@@ -198,7 +199,7 @@ async def evaluate(
     if filtered_df.empty:
         return {"error": f"No data found for {col_name} '{area_value}'"}
 
-    # ✅ ใช้ features ตาม level โดยไม่ rename
+    #ใช้ features ตาม level โดยไม่ rename
     X = filtered_df[features[level]]
     y = filtered_df[targets]
 
@@ -221,6 +222,27 @@ async def evaluate(
     mse = mean_squared_error(y, y_pred, multioutput="raw_values")
     mae = mean_absolute_error(y, y_pred, multioutput="raw_values")
 
+    # --- Feature importance ---
+    feature_names = X.columns.tolist()
+    importance = np.zeros(len(feature_names))
+    try:
+        if model_type in ["rf", "xgb", "catb"]:
+            all_importances = [est.feature_importances_ for est in model.estimators_]
+            importance = np.mean(all_importances, axis=0)
+        elif model_type in ["linear", "sgd"]:
+            all_coefs = [np.abs(est.coef_) for est in model.estimators_]
+            importance = np.mean(all_coefs, axis=0)
+    except:
+        importance = np.zeros(len(feature_names))
+
+    if importance.sum() > 0:
+        importance = importance / importance.sum() * 100
+
+    feature_importance = [
+        {"feature": f, "importance": round(float(imp), 2)}
+        for f, imp in zip(feature_names, importance)
+    ]
+
     return {
         "filename": file.filename,
         col_name: area_value,
@@ -236,7 +258,8 @@ async def evaluate(
                 "pred": yp
             }
             for year, yt, yp in zip(filtered_df["Year"].tolist(), y.values.tolist(), y_pred.tolist())
-        ]
+        ],
+        "feature_importance": feature_importance
     }
 
 
@@ -278,7 +301,6 @@ features_district = [
 #***sample ข้อมูลไว้ใช้ทดสอบเยอะๆหน่อย มีทั้งผิด และถูก
 #หาปัจจัยที่มีผล ต่อ target ว่าอันไหน มีผลสุด ---อีกเส้น อีก endpoint
 
-#เส้นนี้ช้าอยู่
 @app.post("/forecast_future/{level}/{crop}/") 
 async def forecast_future(level: str, crop: str, request: FutureForecastRequest):
     if level not in ["province", "district"]:
@@ -385,20 +407,6 @@ async def forecast_file(level: str, crop: str, file: UploadFile = File(...),mode
 
     return {"results": results}
 
-# features = {
-#     "province": [
-#         'Product/ Yield (kg)', 'Plant-month', 'Cutivated Area (rai)',
-#         'Harvest-area (rai)', 'rain-avg', 'press-avg', 'temp-avg',
-#         'RH-avg', 'wind-avg', 'NDVI', 'runoff', 'RootMoist_inst',
-#         'province_lat', 'province_lon','Year'
-#     ],
-#     "district": [
-#         'Product/ Yield (kg)', 'Plant-month', 'Cutivated Area (rai)',
-#         'Harvest-area (rai)', 'rain-avg', 'press-avg', 'temp-avg',
-#         'RH-avg', 'wind-avg', 'NDVI', 'runoff', 'RootMoist_inst',
-#         'district_lat', 'district_lon','Year'
-#     ]
-# }
 # train model test เป็น อนาคตต่อจาก train เสมอ **fig เป็นปีสุดท้ายเอาไว้ test เลยดีกว่า
 @app.post("/train_model/{level}")
 async def train_model(
