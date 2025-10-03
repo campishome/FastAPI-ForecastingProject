@@ -497,10 +497,22 @@ async def train_model(
         {"feature": f, "importance": round(float(imp), 2)}
         for f, imp in zip(feature_names, importance)
     ]
+    # --- Mapping ของ level ไป column ที่มีจริงใน dataset ---
+    level_column_map = {
+        "province": "Province",   # หรือ "จังหวัด" ถ้าไฟล์เป็นภาษาไทย
+        "district": "District"    # หรือ "อำเภอ"
+    }
+
+    location_col = level_column_map.get(level)
+    if location_col not in test_df.columns:
+        return {"error": f"Column '{location_col}' not found in dataset"}
+
+    locations = test_df[location_col].values
 
     # --- Convert outputs to native types for JSON ---
     return {
         "level": level,
+        "filename": file.filename,
         "model_type": model_type,
         "targets": targets,
         "train_years": train_years,
@@ -509,6 +521,13 @@ async def train_model(
         "rmse": rmse.tolist(),
         "mae": mae.tolist(),
         "feature_importance": feature_importance,
-        "predictions": y_pred.tolist(),
-        "y_test": y_test.tolist()
+        "y_true_vs_pred": [
+            {
+                "location": loc,
+                "predictions": y_pred[i].tolist(),
+                "y_test": y_test[i].tolist()
+            }
+            for i, loc in enumerate(locations)
+        ]
+
     }
