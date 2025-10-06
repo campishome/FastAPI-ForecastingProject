@@ -1,10 +1,10 @@
 from fastapi import FastAPI, Form, File, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
 import joblib
 import io
 from sklearn.metrics import mean_squared_error, mean_absolute_error
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sklearn.preprocessing import StandardScaler
 import os
@@ -17,7 +17,7 @@ from sklearn.linear_model import LinearRegression, SGDRegressor
 app = FastAPI()
 
 origins = [
-    "http://localhost:4200",     # ตอน dev Angular
+    "https://rice-project-orcin.vercel.app",     # ตอน dev Angular
 ]
 
 app.add_middleware(
@@ -422,25 +422,43 @@ async def train_model(
 
     # --- Load dataset ---
     contents = await file.read()
-    df = pd.read_excel(io.BytesIO(contents))
+    try:
+        df = pd.read_excel(io.BytesIO(contents))
+    except Exception as e:
+        return {"error": f"Failed to read Excel file: {e}"}
 
     # --- Convert year params ---
-    train_years = [int(y.strip()) for y in train_years.split(",")]
-    test_years = [int(y.strip()) for y in test_years.split(",")]
+    try:
+        train_years = [int(y.strip()) for y in train_years.split(",")]
+        test_years = [int(y.strip()) for y in test_years.split(",")]
+    except ValueError:
+        return {"error": "Train/test years must be comma-separated integers."}
 
     # --- Validate targets ---
     for target in targets:
         if target not in df.columns:
             return {"error": f"Target '{target}' not found in dataset"}
 
+    if "Year" not in df.columns:
+        return {"error": "Column 'Year' not found in dataset"}
+
     # --- Split train/test ---
     train_df = df[df["Year"].isin(train_years)]
     test_df = df[df["Year"].isin(test_years)]
 
-    X_train = train_df[features[level]].drop(columns=["Year"])
-    y_train = train_df[targets]  # DataFrame เพื่อ scale
-    X_test = test_df[features[level]].drop(columns=["Year"])
-    y_test = test_df[targets].values  # numpy array
+    if train_df.empty or test_df.empty:
+        return {"error": "Train or test set is empty after filtering by year."}
+
+    # --- Prepare features ---
+    feature_cols = features[level]
+    missing_features = [f for f in feature_cols if f not in df.columns]
+    if missing_features:
+        return {"error": f"Missing features in dataset: {missing_features}"}
+
+    X_train = train_df[feature_cols].drop(columns=["Year"], errors="ignore")
+    y_train = train_df[targets]
+    X_test = test_df[feature_cols].drop(columns=["Year"], errors="ignore")
+    y_test = test_df[targets].values
 
     # --- Scaling ---
     scaler_X = StandardScaler()
@@ -464,7 +482,7 @@ async def train_model(
     else:
         return {"error": f"Unknown model_type: {model_type}"}
 
-    # --- MultiOutput ---
+    # --- Train model ---
     model = MultiOutputRegressor(base_estimator)
     model.fit(X_train_scaled, y_train_scaled)
 
@@ -487,8 +505,8 @@ async def train_model(
         elif model_type in ["linear", "sgd"]:
             all_coefs = [np.abs(est.coef_) for est in model.estimators_]
             importance = np.mean(all_coefs, axis=0)
-    except:
-        importance = np.zeros(len(feature_names))
+    except Exception:
+        pass
 
     if importance.sum() > 0:
         importance = importance / importance.sum() * 100
@@ -497,19 +515,17 @@ async def train_model(
         {"feature": f, "importance": round(float(imp), 2)}
         for f, imp in zip(feature_names, importance)
     ]
-    # --- Mapping ของ level ไป column ที่มีจริงใน dataset ---
-    level_column_map = {
-        "province": "Province",   # หรือ "จังหวัด" ถ้าไฟล์เป็นภาษาไทย
-        "district": "District"    # หรือ "อำเภอ"
-    }
 
+    # --- Map level to dataset column ---
+    level_column_map = {"province": "Province", "district": "District"}
     location_col = level_column_map.get(level)
+
     if location_col not in test_df.columns:
         return {"error": f"Column '{location_col}' not found in dataset"}
 
     locations = test_df[location_col].values
 
-    # --- Convert outputs to native types for JSON ---
+    # --- Return result ---
     return {
         "level": level,
         "filename": file.filename,
@@ -527,7 +543,6 @@ async def train_model(
                 "predictions": y_pred[i].tolist(),
                 "y_test": y_test[i].tolist()
             }
-            for i, loc in enumerate(locations)
-        ]
-
+            for i, loc in enumerate(locations[:len(y_pred)])  # ป้องกัน index out of range
+        ],
     }
