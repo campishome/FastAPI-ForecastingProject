@@ -16,14 +16,14 @@ from sklearn.linear_model import LinearRegression, SGDRegressor
 
 app = FastAPI()
 
-origins = [
-    "http://localhost:4200", 
-    "https://rice-project-orcin.vercel.app",     # ตอน dev Angular
-]
+# origins = [
+#     "http://localhost:4200", 
+#     "https://rice-project-nine.vercel.app",     
+# ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,        # ใส่ ["*"] ถ้าจะเปิดทุก origin
+    allow_origins=["*"],        # ใส่ ["*"] ถ้าจะเปิดทุก origin
     allow_credentials=True,
     allow_methods=["*"],          # GET, POST, PUT, DELETE, OPTIONS
     allow_headers=["*"],
