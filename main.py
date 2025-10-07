@@ -17,6 +17,7 @@ from sklearn.linear_model import LinearRegression, SGDRegressor
 app = FastAPI()
 
 origins = [
+    "http://localhost:4200", 
     "https://rice-project-orcin.vercel.app",     # ตอน dev Angular
 ]
 
