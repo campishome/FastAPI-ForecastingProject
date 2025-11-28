@@ -82,7 +82,7 @@ scalers = {
     "105": {
         "province": {
             "X": "assets/models/model_province/scaler_X_province_105.pkl",
-            "y": "assets/models/model_province/scaler_y_province_06.pkl"
+            "y": "assets/models/model_province/scaler_y_province_105.pkl"    ##---------ไอ้แก้เอ้ย code เก่าเป็น 06 แก้แล้ว
         },
         "district": {
             "X": "assets/models/model_district/scaler_X_district_105.pkl",
